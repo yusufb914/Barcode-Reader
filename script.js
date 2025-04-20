@@ -1,5 +1,5 @@
 /**
- * Geliştirilmiş Kitap Barkod Okuma Sistemi (Barcode Scanner API)
+ * Geliştirilmiş Kitap Barkod Okuma Sistemi (Barcode Scanner API ile)
  * Son Güncelleme: 2025-04-22
  */
 
@@ -21,6 +21,9 @@ document.addEventListener("DOMContentLoaded", () => {
     // Tarama durumunu izle
     let isScanning = false;
     let scanAttempts = 0;
+    let lastDetectedCode = null;
+    let detectionCount = 0;
+    const REQUIRED_DETECTION_COUNT = 3; // Aynı barkodun kaç kez doğrulanması gerektiği
 
     /**
      * Barkod tarama işlemini başlatır
@@ -29,6 +32,8 @@ document.addEventListener("DOMContentLoaded", () => {
         if (isScanning) return;
         isScanning = true;
         scanAttempts = 0;
+        lastDetectedCode = null;
+        detectionCount = 0;
         statusEl.innerHTML = '<p class="scanning">📷 Barkodu kameraya gösterin</p>';
         clearUI();
 
@@ -84,9 +89,8 @@ document.addEventListener("DOMContentLoaded", () => {
                                 .then((barcodes) => {
                                     if (barcodes.length > 0) {
                                         const code = barcodes[0].rawValue;
-                                        statusEl.innerHTML = `<p class="success">✅ Barkod Bulundu: ${code}</p>`;
-                                        acceptBarcode(code);
-                                        stream.getTracks().forEach((track) => track.stop());
+                                        handleDetectedCode(code); // Doğrulama için fonksiyona gönder
+                                        requestAnimationFrame(processFrame); // Tarama devam etsin
                                     } else {
                                         requestAnimationFrame(processFrame);
                                     }
@@ -182,25 +186,40 @@ document.addEventListener("DOMContentLoaded", () => {
             if (!result || !result.codeResult) return;
             const code = result.codeResult.code;
             const confidence = result.codeResult.confidence;
-             console.log(`Quagga Algılama #${scanAttempts}: ${code} (${confidence.toFixed(2)})`);
+            console.log(`Quagga Algılama #${scanAttempts}: ${code} (${confidence.toFixed(2)})`);
             if (confidence > 0.8) {  // Yüksek güvenilirlik
-                statusEl.innerHTML = `<p class="success">✅ Barkod Bulundu: ${code}</p>`;
-                acceptBarcode(code);
+                handleDetectedCode(code);
             }
-            else{
-                 statusEl.innerHTML = `<p class="scanning">Düşük Güvenilirlik: ${code} (${confidence.toFixed(2)})</p>`;
+            else {
+                statusEl.innerHTML = `<p class="scanning">Düşük Güvenilirlik: ${code} (${confidence.toFixed(2)})</p>`;
             }
-           
+
         });
 
         Quagga.onProcessed(handleProcessing);
         Quagga.onProcessed(trackBarcodePosition);
     }
 
-
+    /**
+     * Algılanan barkod kodunu işler ve doğrular
+     * @param {string} code - Algılanan barkod kodu
+     */
+    function handleDetectedCode(code) {
+        if (lastDetectedCode !== code) {
+            lastDetectedCode = code;
+            detectionCount = 1;
+            statusEl.innerHTML = `<p class="scanning">Barkod algılandı: ${code} (${detectionCount}/${REQUIRED_DETECTION_COUNT} onay gerekiyor)</p>`;
+        } else {
+            detectionCount++;
+            statusEl.innerHTML = `<p class="scanning">Barkod algılandı: ${code} (${detectionCount}/${REQUIRED_DETECTION_COUNT} onay gerekiyor)</p>`;
+            if (detectionCount >= REQUIRED_DETECTION_COUNT) {
+                acceptBarcode(code);
+            }
+        }
+    }
 
     /**
-     * Barkod algılandıktan sonraki işlemleri gerçekleştirir
+     * Barkod doğrulandıktan sonraki işlemleri gerçekleştirir
      * @param {string} code - Algılanan barkod
      */
     function acceptBarcode(code) {
@@ -375,20 +394,20 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!isScanning) return;
 
         if ('BarcodeDetector' in window) {
-             const videoElement = document.getElementById('video');
-             if(videoElement && videoElement.srcObject){
+            const videoElement = document.getElementById('video');
+            if (videoElement && videoElement.srcObject) {
                 const stream = videoElement.srcObject;
                 const tracks = stream.getTracks();
                 tracks.forEach(track => track.stop());
-             }
+            }
         }
-        else{
+        else {
             Quagga.stop();
             Quagga.offDetected();
             Quagga.offProcessed(handleProcessing);
             Quagga.offProcessed(trackBarcodePosition);
         }
-       
+
 
         isScanning = false;
         const overlay = document.querySelector(".scanner-overlay");
