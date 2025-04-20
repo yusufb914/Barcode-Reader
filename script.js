@@ -1,5 +1,5 @@
 /**
- * Geliştirilmiş Kitap Barkod Okuma Sistemi (Dynamsoft Barcode Reader ile)
+ * Geliştirilmiş Kitap Barkod Okuma Sistemi (Barcode Scanner API ile)
  * Son Güncelleme: 2025-04-22
  */
 
@@ -9,9 +9,6 @@ const books = [
     { barcode: "9786053758872", title: "Kürk Mantolu Madonna", author: "Sabahattin Ali", price: "75.00 TL" },
     { barcode: "9789944886880", title: "Simyacı", author: "Paulo Coelho", price: "79.90 TL" }
 ];
-
-// Dynamsoft lisans anahtarınızı buraya girin
-const DYNAMSOFT_LICENSE_KEY = "YOUR_LICENSE_KEY"; // !!! Lisans anahtarınızı buraya girin !!!
 
 document.addEventListener("DOMContentLoaded", () => {
     // DOM elemanlarını seç
@@ -27,7 +24,6 @@ document.addEventListener("DOMContentLoaded", () => {
     let lastDetectedCode = null;
     let detectionCount = 0;
     const REQUIRED_DETECTION_COUNT = 3; // Aynı barkodun kaç kez doğrulanması gerektiği
-    let barcodeReaderInstance = null; // Dynamsoft Barcode Reader instance'ı
 
     /**
      * Barkod tarama işlemini başlatır
@@ -41,116 +37,168 @@ document.addEventListener("DOMContentLoaded", () => {
         statusEl.innerHTML = '<p class="scanning">📷 Barkodu kameraya gösterin</p>';
         clearUI();
 
-        // Dynamsoft Barcode Reader'ı başlat
-        initDynamsoftScanner()
-            .then(() => {
-                if (barcodeReaderInstance) {
-                    startDynamsoftScanning();
-                }
-            })
-            .catch(error => {
-                statusEl.innerHTML = `<p class="error">❌ Tarayıcı başlatılamadı: ${error.message}</p>`;
-                console.error("Tarayıcı başlatma hatası:", error);
-                isScanning = false;
-            });
+        // Barkod Tarayıcı API'sini kontrol et
+        if ('BarcodeDetector' in window) {
+            startBarcodeScannerAPI();
+        } else {
+            statusEl.innerHTML = '<p class="error">❌ Barkod Tarayıcı API desteklenmiyor, QuaggaJS kullanılacak</p>';
+            startQuaggaScanner(); // Fallback olarak QuaggaJS'yi başlat
+        }
     }
 
     /**
-     * Dynamsoft Barcode Reader'ı başlatır
+     * Barkod Tarayıcı API'sini kullanarak tarama işlemini başlatır
      */
-    function initDynamsoftScanner() {
-        return new Promise((resolve, reject) => {
-            if (barcodeReaderInstance) {
-                resolve(); // Zaten başlatılmışsa resolve et
-                return;
-            }
-
-            Dynamsoft.BarcodeReader.licenseKey = DYNAMSOFT_LICENSE_KEY;
-            Dynamsoft.BarcodeReader.createInstance()
-                .then(reader => {
-                    barcodeReaderInstance = reader;
-                    // barcodeReaderInstance. 엔진 ayarlarını burada yapabilirsiniz (örn. formatlar, vb.)
-                    barcodeReaderInstance.updateRuntimeSettings({
-                        "barcodeFormatIds": [
-                            Dynamsoft.EnumBarcodeFormat.BF_EAN_13,
-                            Dynamsoft.EnumBarcodeFormat.BF_EAN_8,
-                            Dynamsoft.EnumBarcodeFormat.BF_CODE_128,
-                            Dynamsoft.EnumBarcodeFormat.BF_UPC_A,
-                            Dynamsoft.EnumBarcodeFormat.BF_UPC_E,
-                            Dynamsoft.EnumBarcodeFormat.BF_QR_CODE,
-                            Dynamsoft.EnumBarcodeFormat.BF_CODE_39,
-                            Dynamsoft.EnumBarcodeFormat.BF_INTERLEAVED_25
-                        ],
-                        "deblurLevel": 3, // Görüntü netliğini artırır
-                        "maxAlgorithmThreadCount": 4, // Performansı artırır
-                    }).then(() => {
-                         resolve();
-                    }).catch((error) =>{
-                        reject(error);
-                    })
-
-                })
-                .catch(error => {
-                    reject(error);
-                });
-        });
-    }
-
-    /**
-     * Dynamsoft Barcode Reader ile tarama işlemini başlatır
-     */
-    function startDynamsoftScanning() {
-        scannerEl.innerHTML = '<video id="video" width="100%" height="100%" style="display:block;"></video>';
-        const videoElement = document.getElementById('video');
-
+    function startBarcodeScannerAPI() {
         navigator.mediaDevices.getUserMedia({
             video: {
                 facingMode: "environment",
             },
         })
-            .then(stream => {
+            .then((stream) => {
+                const track = stream.getVideoTracks()[0];
+                const imageCapture = new ImageCapture(track);
+
+                scannerEl.innerHTML = '<video id="video" width="100%" height="100%" style="display:block;"></video>';
+                const videoElement = document.getElementById('video');
                 videoElement.srcObject = stream;
                 videoElement.play();
 
+                const barcodeDetector = new BarcodeDetector({
+                    formats: [
+                        "ean_13",
+                        "ean_8",
+                        "code_128",
+                        "upc_a",
+                        "upc_e",
+                        "qr_code", // QR kod ekledim
+                        "code_39", //code 39 ekledim
+                        "itf"
+                    ],
+                });
+
                 const processFrame = () => {
-                    if (!isScanning || !barcodeReaderInstance) {
-                        stream.getTracks().forEach(track => track.stop());
-                        if(barcodeReaderInstance){
-                           barcodeReaderInstance.cancel(); // Mevcut taramayı iptal et
-                        }
+                    if (!isScanning) {
+                        stream.getTracks().forEach((track) => track.stop());
                         return;
                     }
 
-                    barcodeReaderInstance.decodeVideo(videoElement)
-                        .then(results => {
-                            if (results.length > 0) {
-                                const code = results[0].text;
-                                handleDetectedCode(code); // Doğrulama için fonksiyona gönder
-                            }
-                            requestAnimationFrame(processFrame); // Bir sonraki kareyi işle
+                    imageCapture.grabFrame()
+                        .then((image) => {
+                            barcodeDetector.detect(image)
+                                .then((barcodes) => {
+                                    if (barcodes.length > 0) {
+                                        const code = barcodes[0].rawValue;
+                                        handleDetectedCode(code); // Doğrulama için fonksiyona gönder
+                                        requestAnimationFrame(processFrame); // Tarama devam etsin
+                                    } else {
+                                        requestAnimationFrame(processFrame);
+                                    }
+                                })
+                                .catch((err) => {
+                                    console.error("Barkod algılama hatası:", err);
+                                    requestAnimationFrame(processFrame); // Hata durumunda da taramaya devam et
+                                });
                         })
-                        .catch(error => {
-                            console.error("Barkod okuma hatası:", error);
-                            if (error.message.includes("No barcode detected")) {
-                                requestAnimationFrame(processFrame); // Barkod bulunamadı hatası ise taramaya devam et
-                            } else {
-                                statusEl.innerHTML = `<p class="error">❌ Barkod okuma hatası: ${error.message}</p>`;
-                                stream.getTracks().forEach(track => track.stop());
-                                isScanning = false;
-                            }
+                        .catch((err) => {
+                            console.error("Görüntü yakalama hatası:", err);
+                            statusEl.innerHTML = `<p class="error">❌ Görüntü yakalama hatası: ${err.message}</p>`;
+                            stream.getTracks().forEach((track) => track.stop());
+                            isScanning = false;
                         });
                 };
 
-                processFrame(); // Tarama döngüsünü başlat
+                processFrame();
             })
-            .catch(error => {
-                statusEl.innerHTML = `<p class="error">❌ Kamera başlatılamadı: ${error.message}</p>`;
-                console.error("Kamera hatası:", error);
+            .catch((err) => {
+                statusEl.innerHTML = '<p class="error">❌ Kamera başlatılamadı: ' + err.message + '</p>';
+                console.error("Kamera Hatası:", err);
                 isScanning = false;
             });
     }
 
+    /**
+     * QuaggaJS kütüphanesini kullanarak tarama işlemini başlatır (fallback olarak)
+     */
+    function startQuaggaScanner() {
+        Quagga.init({
+            inputStream: {
+                name: "Live",
+                type: "LiveStream",
+                target: scannerEl,
+                constraints: {
+                    width: { min: 800, ideal: 1280, max: 1920 },
+                    height: { min: 600, ideal: 720, max: 1080 },
+                    facingMode: "environment",
+                    advanced: [{ focusMode: "continuous" }, { focusMode: "auto" }],
+                },
+                area: {
+                    top: "20%",
+                    right: "20%",
+                    left: "20%",
+                    bottom: "20%",
+                },
+            },
+            locator: {
+                patchSize: "medium",
+                halfSample: true,
+                debug: {
+                    showCanvas: true,
+                    showPatches: true,
+                    showFoundPatches: true,
+                },
+            },
+            numOfWorkers: navigator.hardwareConcurrency || 2,
+            frequency: 15,
+            decoder: {
+                readers: [
+                    "ean_reader",
+                    "ean_8_reader",
+                    "code_128_reader",
+                    "upc_reader",
+                    "upc_e_reader",
+                    "i2of5_reader",
+                ],
+                multiple: false,
+                debug: {
+                    drawBoundingBox: true,
+                    showFrequency: true,
+                    drawScanline: true,
+                    showPattern: true,
+                },
+            },
+            locate: true,
+        }, (err) => {
+            if (err) {
+                statusEl.innerHTML = '<p class="error">❌ Kamera başlatılamadı: ' + err.message + '</p>';
+                console.error("Kamera Hatası:", err);
+                isScanning = false;
+                return;
+            }
 
+            Quagga.start();
+            addScanOverlay();
+            statusEl.innerHTML = '<p class="scanning">📷 Tarama başlatıldı - Barkodu yavaşça yaklaştırın</p>';
+        });
+
+        Quagga.onDetected((result) => {
+            scanAttempts++;
+            if (!result || !result.codeResult) return;
+            const code = result.codeResult.code;
+            const confidence = result.codeResult.confidence;
+            console.log(`Quagga Algılama #${scanAttempts}: ${code} (${confidence.toFixed(2)})`);
+            if (confidence > 0.8) {  // Yüksek güvenilirlik
+                handleDetectedCode(code);
+            }
+            else {
+                statusEl.innerHTML = `<p class="scanning">Düşük Güvenilirlik: ${code} (${confidence.toFixed(2)})</p>`;
+            }
+
+        });
+
+        Quagga.onProcessed(handleProcessing);
+        Quagga.onProcessed(trackBarcodePosition);
+    }
 
     /**
      * Algılanan barkod kodunu işler ve doğrular
@@ -182,26 +230,186 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     /**
+     * Barkodun kamera görüntüsündeki pozisyonunu takip eder
+     * ve kullanıcıya pozisyon ipuçları verir
+     * @param {Object} result - İşleme sonucu (QuaggaJS için)
+     */
+    function trackBarcodePosition(result) {
+        if (!result || !result.boxes) return;
+
+        // Kamera görüntüsünün boyutlarını al
+        const canvas = document.querySelector('#scanner-container canvas.drawingBuffer');
+        if (!canvas) return;
+
+        const width = canvas.width;
+        const height = canvas.height;
+
+        // Merkez alanı tanımla (ekranın %30'u)
+        const centerX = width / 2;
+        const centerY = height / 2;
+        const centerWidth = width * 0.3;
+        const centerHeight = height * 0.3;
+
+        // Algılanan kutuları kontrol et
+        let hasBoxInCenter = false;
+        let boxX = 0,
+            boxY = 0;
+
+        if (result.box) {
+            // Kutunun merkez noktasını hesapla
+            const centerPoint = result.box.reduce((acc, point) => {
+                return [acc[0] + point[0] / 4, acc[1] + point[1] / 4];
+            }, [0, 0]);
+
+            boxX = centerPoint[0];
+            boxY = centerPoint[1];
+
+            // Kutu merkez alanda mı?
+            hasBoxInCenter = (
+                boxX > centerX - centerWidth / 2 &&
+                boxX < centerX + centerWidth / 2 &&
+                boxY > centerY - centerHeight / 2 &&
+                boxY < centerY + centerHeight / 2
+            );
+
+            // Kullanıcıya pozisyon ipuçları ver
+            if (!hasBoxInCenter) {
+                let hint = "Barkodu merkeze getirin: ";
+
+                if (boxY < centerY - centerHeight / 2) hint += "Aşağı ";
+                else if (boxY > centerY + centerHeight / 2) hint += "Yukarı ";
+
+                if (boxX < centerX - centerWidth / 2) hint += "Sağa ";
+                else if (boxX > centerX + centerWidth / 2) hint += "Sola ";
+
+                hint += "hareket ettirin";
+                statusEl.innerHTML = `<p class="scanning">${hint}</p>`;
+            } else {
+                statusEl.innerHTML = '<p class="scanning">İyi! Barkodu sabit tutun...</p>';
+            }
+        }
+    }
+
+    /**
+     * Görüntü işleme ve tarama visualizasyonu (QuaggaJS için)
+     * @param {Object} result - İşleme sonucu
+     */
+    function handleProcessing(result) {
+        if (!result) return;
+
+        const canvas = document.querySelector('#scanner-container canvas.drawingBuffer');
+        if (!canvas) return;
+
+        const ctx = canvas.getContext('2d');
+        const width = canvas.width;
+        const height = canvas.height;
+
+        // Merkez hedef alanını çiz
+        ctx.clearRect(0, 0, width, height);
+
+        // Algılanan barkodları vurgula
+        if (result.boxes) {
+            result.boxes.filter(box => box !== result.box).forEach(box => {
+                drawCanvasLines(ctx, box, '#2ecc71', 2);
+            });
+        }
+
+        if (result.box) {
+            drawCanvasLines(ctx, result.box, '#e74c3c', 3);
+        }
+
+        // Tarama alanını vurgula
+        ctx.strokeStyle = 'rgba(52, 152, 219, 0.5)';
+        ctx.lineWidth = 2;
+
+        // Merkezde tarama alanı
+        const centerX = width / 2;
+        const centerY = height / 2;
+        const centerWidth = width * 0.3;
+        const centerHeight = height * 0.3;
+
+        ctx.beginPath();
+        ctx.rect(
+            centerX - centerWidth / 2,
+            centerY - centerHeight / 2,
+            centerWidth,
+            centerHeight
+        );
+        ctx.stroke();
+    }
+
+    /**
+     * Canvas üzerine kutu çizer
+     * @param {CanvasRenderingContext2D} ctx - Canvas context
+     * @param {Array} box - Kutu koordinatları
+     * @param {string} color - Çizgi rengi
+     * @param {number} lineWidth - Çizgi kalınlığı
+     */
+    function drawCanvasLines(ctx, box, color, lineWidth) {
+        ctx.lineWidth = lineWidth;
+        ctx.strokeStyle = color;
+        ctx.beginPath();
+
+        const lastPoint = box[box.length - 1];
+        ctx.moveTo(lastPoint[0], lastPoint[1]);
+
+        box.forEach(point => {
+            ctx.lineTo(point[0], point[1]);
+        });
+
+        ctx.stroke();
+    }
+
+    /**
+     * Tarayıcı üzerine hedef katmanı ekler
+     */
+    function addScanOverlay() {
+        const overlay = document.createElement("div");
+        overlay.className = "scanner-overlay";
+        overlay.innerHTML = `
+      <div class="scanner-target">
+        <div class="scanner-corners top-left"></div>
+        <div class="scanner-corners top-right"></div>
+        <div class="scanner-corners bottom-left"></div>
+        <div class="scanner-corners bottom-right"></div>
+      </div>
+      <div class="scanner-guidance">Barkodu hedef alanın içine getirin</div>
+    `;
+        scannerEl.appendChild(overlay);
+    }
+
+    /**
+     * Bip sesi çalar
+     */
+    function playBeepSound() {
+        const beep = new Audio("data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU==");
+        beep.volume = 0.2;
+        beep.play().catch(err => console.log("Ses çalma hatası:", err));
+    }
+
+    /**
      * Tarayıcıyı durdurur
      */
     function stopScanner() {
         if (!isScanning) return;
 
+        if ('BarcodeDetector' in window) {
+            const videoElement = document.getElementById('video');
+            if (videoElement && videoElement.srcObject) {
+                const stream = videoElement.srcObject;
+                const tracks = stream.getTracks();
+                tracks.forEach(track => track.stop());
+            }
+        }
+        else {
+            Quagga.stop();
+            Quagga.offDetected();
+            Quagga.offProcessed(handleProcessing);
+            Quagga.offProcessed(trackBarcodePosition);
+        }
+
+
         isScanning = false;
-        if (barcodeReaderInstance) {
-            barcodeReaderInstance.cancel();    // Decode işlemini durdur.
-            barcodeReaderInstance.close().then(()=>{
-                barcodeReaderInstance = null;
-            });
-        }
-
-        const videoElement = document.getElementById('video');
-        if (videoElement && videoElement.srcObject) {
-            const stream = videoElement.srcObject;
-            const tracks = stream.getTracks();
-            tracks.forEach(track => track.stop());
-        }
-
         const overlay = document.querySelector(".scanner-overlay");
         if (overlay) overlay.remove();
     }
@@ -211,7 +419,7 @@ document.addEventListener("DOMContentLoaded", () => {
      */
     function clearUI() {
         resultEl.innerHTML = "";
-        scannerEl.innerHTML = ""; // Video elementini temizler
+        scannerEl.innerHTML = ""; //video elementini temizler
     }
 
     /**
