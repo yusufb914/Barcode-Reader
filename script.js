@@ -7,7 +7,7 @@
 const books = [
     { barcode: "9789750802942", title: "Saatleri Ayarlama Enstitüsü", author: "Ahmet Hamdi Tanpınar", price: "89.00 TL" },
     { barcode: "9786053758872", title: "Kürk Mantolu Madonna", author: "Sabahattin Ali", price: "75.00 TL" },
-    { barcode: "9789944886880", title: "Simyacı", author: "Paulo Coelho", price: "79.90 TL" }
+    { barcode: "9789750762246", title: "Simyacı", author: "Paulo Coelho", price: "79.90 TL" }
 ];
 
 document.addEventListener("DOMContentLoaded", () => {
